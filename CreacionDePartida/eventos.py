@@ -1,5 +1,7 @@
 import discord
 from roles import asignar_roles
+import asyncio
+from Noche.noche import fase_noche, matar
 
 partidas = {}
 
@@ -46,8 +48,8 @@ async def unirse_partida(message, partida_id: int):
 
 async def iniciar_partida(message, partida_id: int, bot: discord.Client):
     """Inicia la partida y envía los roles a los jugadores"""
+    
     print(f"[DEBUG] Comando 'iniciar' recibido con partida ID {partida_id}")  # Depuración
-
     if partida_id not in partidas:
         await message.channel.send("❌ La partida no existe.")
         print(f"[DEBUG] No existe partida con ID {partida_id}")
@@ -56,6 +58,7 @@ async def iniciar_partida(message, partida_id: int, bot: discord.Client):
     partida = partidas[partida_id]
 
     print(f"[DEBUG] Jugadores en la partida: {partida['jugadores']}")  # Verificación de jugadores
+    
     if len(partida['jugadores']) < partida['num_jugadores']:
         await message.channel.send(f"⚠️ Aún no se han unido todos los jugadores. Necesitas {partida['num_jugadores']} jugadores.")
         print(f"[DEBUG] Número de jugadores en la partida: {len(partida['jugadores'])} / {partida['num_jugadores']}")
@@ -74,17 +77,34 @@ async def iniciar_partida(message, partida_id: int, bot: discord.Client):
         print(f"[ERROR] Error al asignar roles: {str(e)}")
         return
 
+    # Verificar que roles_asignados no esté vacío
+    if not roles_asignados:
+        await message.channel.send("❌ No se pudieron asignar roles a los jugadores.")
+        print(f"[DEBUG] roles_asignados está vacío: {roles_asignados}")
+        return
+
     # Enviar mensajes privados con el rol asignado
     for jugador_id, rol in roles_asignados.items():
+        print(f"[DEBUG] Enviando mensaje a {jugador_id} con rol {rol}")
         try:
-            # Usamos el bot directamente, no 'message.client'
-            jugador = await bot.fetch_user(jugador_id)  # Obtener el jugador por su ID
+            jugador = await bot.fetch_user(jugador_id)
+            print(f"[DEBUG] Usuario encontrado: {jugador.username}")
             await jugador.send(f"🔹 Tu rol en la partida {partida_id} es: **{rol}**")
+        except discord.NotFound:
+            await message.channel.send(f"❌ El usuario con ID {jugador_id} no fue encontrado.")
         except discord.Forbidden:
-            await message.channel.send(f"⚠️ No pude enviar un mensaje privado a <@{jugador_id}>. Activa los mensajes privados.")
-            print(f"[DEBUG] No pude enviar mensaje a <@{jugador_id}> - Puede que tenga los DM desactivados.")
+            await message.channel.send(f"⚠️ No pude enviarte un mensaje privado, asegúrate de tenerlos habilitados.")
+            print(f"[DEBUG] No pude enviar mensaje a <@{jugador_id}> - Puede que tenga los DM desactivados o haya bloqueado al bot.")
         except Exception as e:
             await message.channel.send(f"❌ Ocurrió un error al enviar el mensaje privado a <@{jugador_id}>.")
             print(f"[ERROR] Error al enviar mensaje privado a <@{jugador_id}>: {e}")
 
     await message.channel.send(f"✅ ¡La partida {partida_id} ha comenzado! Revisa tu mensaje privado para conocer tu rol.")
+
+    # Importar fase_noche solo cuando se necesita
+    from Noche.noche import fase_noche
+
+    # Llamar a la función fase_noche
+    await fase_noche(partida_id, bot)
+
+    await message.channel.send(f"💣 ¡La partida {partida_id} ha comenzado! Revisa tu mensaje privado para conocer tu rol.")

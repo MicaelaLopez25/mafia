@@ -44,5 +44,9 @@ async def on_message(message):
         # Comando desconocido
         else:
             await message.channel.send("❌ Comando no reconocido o parámetros incorrectos.")
+    
+    # Responder al mensaje 'hola'
+    if message.content.lower() == 'hola':
+        await message.channel.send('¡Hola! Soy un bot hecho en Python. 🤖')
 
 bot.run(TOKEN)
