@@ -18,6 +18,20 @@ votos = {}
 mafioso_channel = None
 doctor_channel = None
 detective_channel = None
+jugador_salvado = None
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return  # Evita que el bot se responda a sí mismo
+
+    if message.content.lower() == "hola":
+        await message.channel.send("¡Hola! 👋 Soy un bot hecho con Python.")
+
+    # Muy importante: asegura que los comandos también se sigan procesando
+    await bot.process_commands(message)
+
+
 
 def esta_vivo(jugador):
     """Verifica si el jugador sigue en la partida."""
@@ -59,10 +73,13 @@ async def amanecer(ctx):
     jugador_salvado = None  # Reiniciar la salvación para la siguiente noche
 
     await verificar_ganador(ctx)
-
-    if fase == "día":
+ # Solo enviar el mensaje de votación si la fase es de "día" y si hay jugadores vivos
+    if fase == "día" and len(jugadores) > 1:  # Asegúrate de que haya más de un jugador vivo
         await ctx.send("Es el momento de votar. Usen `!mafia votar @jugador` para elegir a alguien.")
-
+    elif len(jugadores) <= 1:
+        # Si solo queda 1 jugador, el juego ha terminado, no mostrar la votación.
+        await ctx.send("🏁 La partida ha terminado. Usa `!mafia crear X` para empezar otra.")
+    
 @bot.command()
 async def crear(ctx, cantidad: int):
     global jugadores, roles, votos, mafioso_channel, doctor_channel, detective_channel
@@ -161,7 +178,7 @@ async def matar(ctx, miembro: discord.Member):
         return
 
     jugador_muerto = miembro
-    await ctx.send(f"🔪 Has elegido a **{miembro.mention}** como tu víctima.")
+    await ctx.send(f"🕵️‍♂️ El mafioso ha elegido a {miembro.mention}. Se procesará al amanecer.")
 
 @bot.command()
 async def salvar(ctx, miembro: discord.Member):
