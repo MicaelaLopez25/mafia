@@ -2,9 +2,15 @@ import discord
 from discord.ext import commands
 import random
 import asyncio
+import os
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix="!mafia ", intents=intents)
 
 jugadores = []
@@ -14,6 +20,7 @@ mafioso = None
 doctor = None
 detective = None
 jugador_muerto = None
+jugador_salvado = None
 votos = {}
 mafioso_channel = None
 doctor_channel = None
@@ -33,12 +40,34 @@ async def on_message(message):
 
 
 
+# --------- RANKING ---------
+ARCHIVO_RANKING = "ranking.json"
+
+def cargar_ranking():
+    try:
+        with open(ARCHIVO_RANKING, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+def guardar_ranking(ranking):
+    with open(ARCHIVO_RANKING, "w") as f:
+        json.dump(ranking, f, indent=4)
+
+def actualizar_puntaje(nombre, puntos):
+    ranking = cargar_ranking()
+    ranking[nombre] = ranking.get(nombre, 0) + puntos
+    guardar_ranking(ranking)
+
+def obtener_ranking_ordenado():
+    ranking = cargar_ranking()
+    return sorted(ranking.items(), key=lambda x: x[1], reverse=True)
+# ----------------------------
+
 def esta_vivo(jugador):
-    """Verifica si el jugador sigue en la partida."""
     return jugador in jugadores
 
 async def eliminar_permisos(jugador):
-    """Remueve los permisos del jugador en los canales privados al morir."""
     if mafioso_channel:
         await mafioso_channel.set_permissions(jugador, read_messages=False, send_messages=False)
     if doctor_channel:
@@ -50,28 +79,23 @@ async def noche(ctx):
     global fase, jugador_muerto
     fase = "noche"
     jugador_muerto = None
-
     await ctx.send("🌙 Es de noche. Todos los jugadores duermen...")
-
-    await asyncio.sleep(60)  # La noche dura 1 minuto
-
+    await asyncio.sleep(60)
     await amanecer(ctx)
 
 async def amanecer(ctx):
     global fase, jugador_muerto, jugador_salvado
-
     fase = "día"
 
     if jugador_muerto is not None and jugador_muerto == jugador_salvado:
         await ctx.send(f"☀️ Amanece y **{jugador_salvado.name}** fue atacado, ¡pero el doctor lo salvó! 🩺")
-        jugador_muerto = None  # Nadie muere
+        jugador_muerto = None
     elif jugador_muerto is not None:
         await ctx.send(f"☀️ Amanece y encontramos el cuerpo de **{jugador_muerto.name}**. Era **{roles.get(jugador_muerto, 'Desconocido')}**.")
         jugadores.remove(jugador_muerto)
         del roles[jugador_muerto]
 
-    jugador_salvado = None  # Reiniciar la salvación para la siguiente noche
-
+    jugador_salvado = None
     await verificar_ganador(ctx)
  # Solo enviar el mensaje de votación si la fase es de "día" y si hay jugadores vivos
     if fase == "día" and len(jugadores) > 1:  # Asegúrate de que haya más de un jugador vivo
@@ -88,9 +112,9 @@ async def crear(ctx, cantidad: int):
         await ctx.send("⚠️ Se necesitan al menos 4 jugadores para empezar la partida.")
         return
 
-    jugadores = []
-    roles = {}
-    votos = {}
+    jugadores.clear()
+    roles.clear()
+    votos.clear()
 
     guild = ctx.guild
     overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False)}
@@ -108,9 +132,7 @@ async def unirme(ctx):
         return
 
     jugadores.append(ctx.author)
-
     jugadores_lista = "\n".join([f"- {jugador.mention}" for jugador in jugadores])
-    
     await ctx.send(f"✅ {ctx.author.mention} se ha unido a la partida.\n\n📜 **Lista de jugadores:**\n{jugadores_lista}")
 
     if len(jugadores) >= 4:
@@ -124,16 +146,11 @@ async def iniciar_partida(ctx):
         return
 
     random.shuffle(jugadores)
-    
-    mafioso = jugadores[0]
-    doctor = jugadores[1]
-    detective = jugadores[2]
-    ciudadanos = jugadores[3:]
 
-    roles[mafioso] = "Mafioso"
-    roles[doctor] = "Doctor"
-    roles[detective] = "Detective"
-    for ciudadano in ciudadanos:
+    mafioso, doctor, detective = jugadores[:3]
+    for i, rol in zip([mafioso, doctor, detective], ["Mafioso", "Doctor", "Detective"]):
+        roles[i] = rol
+    for ciudadano in jugadores[3:]:
         roles[ciudadano] = "Ciudadano"
 
     await mafioso_channel.set_permissions(mafioso, read_messages=True, send_messages=True)
@@ -158,7 +175,6 @@ async def iniciar_partida(ctx):
 
 @bot.command()
 async def matar(ctx, miembro: discord.Member):
-    """Permite al mafioso matar a un jugador durante la noche."""
     global jugador_muerto
 
     if ctx.channel != mafioso_channel:
@@ -182,7 +198,7 @@ async def matar(ctx, miembro: discord.Member):
 
 @bot.command()
 async def salvar(ctx, miembro: discord.Member):
-    global jugador_muerto, jugador_salvado
+    global jugador_salvado
 
     if ctx.author != doctor or fase != "noche":
         await ctx.send("⚠️ Solo el doctor puede usar este comando durante la noche.")
@@ -195,10 +211,8 @@ async def salvar(ctx, miembro: discord.Member):
     jugador_salvado = miembro
     await ctx.send(f"🩺 Has elegido salvar a **{miembro.mention}** esta noche.")
 
-
 @bot.command()
 async def votar(ctx, miembro: discord.Member):
-    """Comando para votar por un jugador durante el día."""
     global votos
 
     if fase != "día":
@@ -220,12 +234,10 @@ async def votar(ctx, miembro: discord.Member):
     votos[ctx.author] = miembro
     await ctx.send(f"🗳️ {ctx.author.mention} ha votado por {miembro.mention}.")
 
-    # Si todos los jugadores vivos han votado, contar los votos
     if len(votos) == len(jugadores):
         await contar_votos(ctx)
 
 async def contar_votos(ctx):
-    """Cuenta los votos y elimina al jugador más votado."""
     global votos, jugador_muerto
 
     if not votos:
@@ -239,7 +251,7 @@ async def contar_votos(ctx):
         conteo[voto] = conteo.get(voto, 0) + 1
 
     max_votos = max(conteo.values(), default=0)
-    candidatos = [jugador for jugador, votos in conteo.items() if votos == max_votos]
+    candidatos = [jugador for jugador, cantidad in conteo.items() if cantidad == max_votos]
 
     if len(candidatos) > 1:
         await ctx.send("⚠️ Hubo un empate en la votación. Nadie es eliminado esta ronda.")
@@ -247,38 +259,39 @@ async def contar_votos(ctx):
         await noche(ctx)
         return
 
-    # El jugador más votado es eliminado
     jugador_eliminado = candidatos[0]
     await ctx.send(f"🔪 **{jugador_eliminado.name}** ha sido eliminado. Era **{roles[jugador_eliminado]}**.")
-    
+
     jugadores.remove(jugador_eliminado)
     del roles[jugador_eliminado]
-
     votos.clear()
 
-    # Verificar si el mafioso murió
     if jugador_eliminado == mafioso:
         await ctx.send("🎉 ¡El mafioso ha sido eliminado! **Los ciudadanos ganan.**")
+        for jugador in roles:
+            if roles[jugador] != "Mafioso":
+                actualizar_puntaje(jugador.name, 10)
+        actualizar_puntaje(jugador_eliminado.name, -5)
         await terminar_partida(ctx)
-        return
-
-    await noche(ctx)
+    else:
+        await noche(ctx)
 
 async def verificar_ganador(ctx):
     global jugadores, mafioso, fase
 
     if mafioso not in jugadores:
         await ctx.send("🎉 ¡El mafioso ha sido eliminado! **Los ciudadanos ganan.**")
+        for jugador in roles:
+            if roles[jugador] != "Mafioso":
+                actualizar_puntaje(jugador.name, 10)
+        actualizar_puntaje(mafioso.name, -5)
         await terminar_partida(ctx)
-        return
-
-    if len(jugadores) == 1 and mafioso in jugadores:
+    elif len(jugadores) == 1 and mafioso in jugadores:
         await ctx.send("🔪 El mafioso ha eliminado a todos. **Gana el mafioso.** 😈")
+        actualizar_puntaje(mafioso.name, 15)
         await terminar_partida(ctx)
-        return
-
-    fase = "día"
-
+    else:
+        fase = "día"
 
 @bot.command()
 async def terminar_partida(ctx):
@@ -290,8 +303,41 @@ async def terminar_partida(ctx):
         if channel:
             await channel.delete()
 
-    jugadores = []
-    roles = {}
-    votos = {}
+    jugadores.clear()
+    roles.clear()
+    votos.clear()
 
-bot.run("TOKEN")
+    # MOSTRAR RANKING AUTOMÁTICAMENTE
+    ranking = obtener_ranking_ordenado()
+    if ranking:
+        mensaje = "📊 **Ranking de jugadores:**\n"
+        for i, (nombre, puntos) in enumerate(ranking, 1):
+            mensaje += f"{i}. {nombre}: {puntos} puntos\n"
+        await ctx.send(mensaje)
+    else:
+        await ctx.send("🏆 No hay puntajes aún.")
+
+
+@bot.command()
+async def ranking(ctx):
+    ranking = obtener_ranking_ordenado()
+    if not ranking:
+        await ctx.send("🏆 No hay puntajes aún.")
+        return
+
+    mensaje = "📊 **Ranking de jugadores:**\n"
+    for i, (nombre, puntos) in enumerate(ranking, 1):
+        mensaje += f"{i}. {nombre}: {puntos} puntos\n"
+    await ctx.send(mensaje)
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if message.content.lower() == "hola":
+        await message.channel.send(f"¡Hola {message.author.mention}! 👋")
+
+    await bot.process_commands(message)
+
+bot.run(os.getenv("DISCORD_TOKEN"))
