@@ -27,7 +27,6 @@ mafioso_channel = None
 doctor_channel = None
 detective_channel = None
 jugador_salvado = None
-<<<<<<< HEAD
 
 @bot.event
 async def on_message(message):
@@ -40,9 +39,6 @@ async def on_message(message):
     # Muy importante: asegura que los comandos también se sigan procesando
     await bot.process_commands(message)
 
-
-=======
->>>>>>> b0577df (Incluí el modo rápido y los nuevos roles (Juez, Espía))
 
 modo_rapido = False
 tiempo_votacion = 30  # segundos por defecto para votar en modo rápido
@@ -123,7 +119,6 @@ async def iniciar_votacion(ctx):
     asyncio.create_task(temporizador_votacion_dia(ctx))
 
     await verificar_ganador(ctx)
-<<<<<<< HEAD
  # Solo enviar el mensaje de votación si la fase es de "día" y si hay jugadores vivos
     if fase == "día" and len(jugadores) > 1:  # Asegúrate de que haya más de un jugador vivo
         await ctx.send("Es el momento de votar. Usen `!mafia votar @jugador` para elegir a alguien.")
@@ -131,7 +126,6 @@ async def iniciar_votacion(ctx):
         # Si solo queda 1 jugador, el juego ha terminado, no mostrar la votación.
         await ctx.send("🏁 La partida ha terminado. Usa `!mafia crear X` para empezar otra.")
     
-=======
 
 async def temporizador_votacion_dia(ctx):
     await asyncio.sleep(60)
@@ -201,7 +195,6 @@ async def verificar_ganador(ctx):
 
     fase = "día"
 
->>>>>>> b0577df (Incluí el modo rápido y los nuevos roles (Juez, Espía))
 @bot.command()
 async def crear(ctx, cantidad: int):
     global jugadores, roles, votos, mafioso_channel, doctor_channel, detective_channel
@@ -389,12 +382,11 @@ async def matar(ctx, miembro: discord.Member):
         return
 
     jugador_muerto = miembro
-<<<<<<< HEAD
+
     await ctx.send(f"🕵️‍♂️ El mafioso ha elegido a {miembro.mention}. Se procesará al amanecer.")
-=======
+
     await ctx.send(f"🕵️‍♂️ Has elegido a {miembro.mention}. El asesinato se procesará al amanecer.")
 
->>>>>>> b0577df (Incluí el modo rápido y los nuevos roles (Juez, Espía))
 
 @bot.command()
 async def salvar(ctx, miembro: discord.Member):
