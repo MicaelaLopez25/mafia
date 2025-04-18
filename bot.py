@@ -8,6 +8,47 @@ import os
 archivo_puntos = 'puntos.json'
 puntos = {}
 
+def iniciar_puntos():
+    global puntos
+    for jugador in jugadores:
+        jugador_id = str(jugador.id)
+        if jugador_id not in puntos:
+            puntos[jugador_id] = 0
+
+
+def cargar_puntos():
+    global puntos
+    try:
+        with open("puntos.json", "r") as f:
+            puntos = json.load(f)
+            # Convertir claves a int (porque json las guarda como str)
+            puntos = {int(k): v for k, v in puntos.items()}
+    except FileNotFoundError:
+        puntos = {}
+
+
+
+def guardar_puntos():
+    with open("puntos.json", "w") as f:
+        json.dump(puntos, f, indent=4)
+
+
+def otorgar_puntos(jugador, cantidad):
+    global puntos
+    jugador_id = jugador.id
+    if jugador_id in puntos:
+        puntos[str(jugador_id)] += cantidad
+    else:
+        puntos[str(jugador_id)] = cantidad
+    guardar_puntos()
+
+
+#def actualizar_puntos_ganadores(ganadores):
+#   for ganador in ganadores:
+#        otorgar_puntos(ganador, 1)
+
+
+
 intents = discord.Intents.all()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!mafia ", intents=intents)
@@ -15,7 +56,6 @@ bot = commands.Bot(command_prefix="!mafia ", intents=intents)
 
 jugadores = []
 partidas = {}
-puntos = {}
 roles = {}
 fase = "día"
 mafioso = None
@@ -27,6 +67,8 @@ mafioso_channel = None
 doctor_channel = None
 detective_channel = None
 jugador_salvado = None
+
+
 
 @bot.event
 async def on_message(message):
@@ -89,8 +131,10 @@ async def amanecer(ctx):
         jugador_muerto = None  # Nadie muere
     elif jugador_muerto is not None:
         await ctx.send(f"☀️ Amanece y encontramos el cuerpo de **{jugador_muerto.name}**. Era **{roles.get(jugador_muerto, 'Desconocido')}**.")
-        jugadores.remove(jugador_muerto)
-        del roles[jugador_muerto]
+        if jugador_muerto in jugadores:
+            jugadores.remove(jugador_muerto)
+        if jugador_muerto in roles:
+            del roles[jugador_muerto]
 
     jugador_salvado = None  # Reiniciar la salvación para la siguiente noche
     
@@ -139,7 +183,6 @@ async def temporizador_votacion_dia(ctx):
 
 
 async def contar_votos(ctx):
-
     """Cuenta los votos y elimina al jugador más votado."""
     global votos, jugador_muerto
 
@@ -162,23 +205,41 @@ async def contar_votos(ctx):
         await noche(ctx)
         return
 
+    jugador_eliminado_id = candidatos[0]
+    miembro_eliminado = ctx.guild.get_member(jugador_eliminado_id)
 
-    # El jugador más votado es eliminado
-    jugador_eliminado = candidatos[0]
-    await ctx.send(f"🔪 **{jugador_eliminado.name}** ha sido eliminado. Era **{roles[jugador_eliminado]}**.")
-    
-    jugadores.remove(jugador_eliminado)
-    del roles[jugador_eliminado]
+    # Otorgar 5 puntos a quienes votaron correctamente
+    if jugador_eliminado_id in roles and roles[jugador_eliminado_id] == "Mafioso":
+        for jugador_id, voto in votos.items():
+            if voto == jugador_eliminado_id:
+                puntos[jugador_id] = puntos.get(jugador_id, 0) + 5
+                miembro = ctx.guild.get_member(jugador_id)
+                nombre_mention = miembro.mention if miembro else f"Usuario {jugador_id}"
+                await ctx.send(f"🏅 {nombre_mention} recibió 5 puntos por votar correctamente.")
+
+    # Mensaje de eliminación
+    nombre_eliminado = miembro_eliminado.name if miembro_eliminado else f"Usuario {jugador_eliminado_id}"
+    await ctx.send(f"🔪 *{nombre_eliminado}* ha sido eliminado. Era *{roles[jugador_eliminado_id]}*.")
+
+    # Eliminar jugador
+    if jugador_eliminado_id in jugadores:
+        jugadores.remove(jugador_eliminado_id)
+    if jugador_eliminado_id in roles:
+        del roles[jugador_eliminado_id]
 
     votos.clear()
 
     # Verificar si el mafioso murió
-    if jugador_eliminado == mafioso:
+    if jugador_eliminado_id == mafioso:
         await ctx.send("🎉 ¡El mafioso ha sido eliminado! **Los ciudadanos ganan.**")
         await terminar_partida(ctx)
         return
 
     await noche(ctx)
+    await terminar_partida(ctx)
+    await mostrar_ranking(ctx)
+
+
 
 async def verificar_ganador(ctx):
     global jugadores, mafioso, fase
@@ -387,6 +448,7 @@ async def matar(ctx, miembro: discord.Member):
 
     await ctx.send(f"🕵️‍♂️ Has elegido a {miembro.mention}. El asesinato se procesará al amanecer.")
 
+    otorgar_puntos(mafioso, 10)
 
 @bot.command()
 async def salvar(ctx, miembro: discord.Member):
@@ -446,11 +508,11 @@ async def temporizador_votacion(ctx):
         await noche(ctx)
 
 def asignar_puntos_ganadores(jugadores, ganadores_ids):
-    print(f"Asignando puntos. Jugadores: {[j.name for j in jugadores]}, Ganadores IDs: {ganadores_ids}")
     for jugador in jugadores:
-        puntos = 10 if jugador.id in ganadores_ids else 2
-        print(f"Dando {puntos} puntos a {jugador.name}")
-        agregar_puntos(jugador, puntos)
+        if jugador.id in ganadores_ids:
+            puntos[jugador.id] = puntos.get(jugador.id, 0) + 1  # Sumar puntos a los ganadores
+        else:
+            puntos[jugador.id] = puntos.get(jugador.id, 0) - 1  # Restar puntos a los perdedores
 
 def agregar_puntos(jugador, puntos_nuevos):
     print(f"Agregando {puntos_nuevos} puntos a {jugador.name} (ID: {jugador.id})")
@@ -506,7 +568,7 @@ async def mafia(ctx, subcomando: str, *args):
 
 def guardar_puntos():
     with open(archivo_puntos, 'w') as f:
-        json.dump(puntos, f)
+        json.dump(puntos, f, indent=4)
 
 def cargar_puntos():
     global puntos
@@ -522,30 +584,44 @@ def agregar_puntos(jugador, puntos_nuevos):
         puntos[jugador_id] = {"nombre": jugador.name, "puntos": puntos_nuevos}
     guardar_puntos()
 
+@bot.command()
+async def puntos_jugador(ctx, jugador: discord.Member = None):
+    if jugador is None:
+        jugador = ctx.author
+    puntaje = puntos.get(jugador.id, 0)
+    await ctx.send(f"🏅 {jugador.mention} tiene {puntaje} puntos.")
+
 
 @bot.command()
 async def terminar_partida(ctx):
-    global jugadores, roles, votos, mafioso_channel, doctor_channel, detective_channel
+    global juego_en_curso, jugadores, roles, fase_actual, votos, protegidos, espias, canal_mafia, tiempo_votacion, modo_rapido
 
-    ganadores_ids = []
-    if mafioso not in jugadores:
-        ganadores_ids = [jugador.id for jugador in jugadores if roles.get(jugador) != "Mafioso"]
-        await ctx.send("🎉 ¡El mafioso ha sido eliminado! **Los ciudadanos ganan.**")
-    elif len(jugadores) == 1 and mafioso in jugadores:
-        ganadores_ids = [mafioso.id]
-        await ctx.send("🔪 El mafioso ha eliminado a todos. **Gana el mafioso.** 😈")
+    # Determinar equipo ganador
+    mafias = [j for j in jugadores if roles[j] == "mafioso"]  
+    inocentes = [j for j in jugadores if roles[j] != "mafioso"]
 
-    asignar_puntos_ganadores(jugadores, ganadores_ids)
+    if len(mafias) == 0:
+        mensaje = "🎉 ¡Los inocentes ganan la partida! 🎉"
+        ganadores = inocentes
+    else:
+        mensaje = "💀 ¡La mafia gana la partida! 💀"
+        ganadores = mafias
 
-    await ctx.send("🏁 La partida ha terminado. Usa `!mafia crear X` para empezar otra.")
+    await ctx.send(mensaje)
 
-    for channel in [mafioso_channel, doctor_channel, detective_channel]:
-        if channel:
-            await channel.delete()
+    # ✅ Mostrar ranking automáticamente al finalizar
+    await mostrar_ranking(ctx)
 
+    # 🔄 Reiniciar el estado del juego
+    juego_en_curso = False
     jugadores = []
     roles = {}
     votos = {}
+    fase_actual = None
+    protegidos = []
+    espias = []
+    canal_mafia = None
+
 
 @bot.command()
 async def mafia_ranking(ctx):
@@ -554,28 +630,29 @@ async def mafia_ranking(ctx):
         await ctx.send("📊 No hay puntos registrados todavía.")
         return
 
-    ranking_ordenado = sorted(puntos.items(), key=lambda x: x[1]["puntos"], reverse=True)
+    ranking_ordenado = sorted(puntos.items(), key=lambda x: x[1], reverse=True)
     
     mensaje = "**🏆 Ranking de Mafia 🏆**\n\n"
     for i, (user_id, data) in enumerate(ranking_ordenado[:10], 1):
         mensaje += f"{i}. **{data['nombre']}** - {data['puntos']} puntos\n"
     
-    await ctx.send(mensaje)
+    await ctx.send(mensaje)  # <-- corregido aquí
 
 @bot.command(name='ranking')
 async def mostrar_ranking(ctx):
-    cargar_puntos()
     if not puntos:
-        await ctx.send("📊 No hay puntos registrados todavía.")
+        await ctx.send("📊 No hay puntos registrados aún.")
         return
 
-    ranking_ordenado = sorted(puntos.items(), key=lambda x: x[1]["puntos"], reverse=True)
-
-    mensaje = "**🏆 Ranking de Mafia 🏆**\n\n"
-    for i, (user_id, data) in enumerate(ranking_ordenado[:10], 1):
-        mensaje += f"{i}. **{data['nombre']}** - {data['puntos']} puntos\n"
+    ranking_ordenado = sorted(puntos.items(), key=lambda item: item[1], reverse=True)
+    mensaje = "🏆 **Ranking de jugadores** 🏆\n"
+    for i, (jugador_id, puntaje) in enumerate(ranking_ordenado, start=1):
+        miembro = ctx.guild.get_member(jugador_id)
+        nombre = miembro.display_name if miembro else f"Usuario {jugador_id}"
+        mensaje += f"{i}. **{nombre}** - {puntaje} puntos\n"
 
     await ctx.send(mensaje)
+
 
 @bot.command()
 async def modo_rapido_on(ctx):
